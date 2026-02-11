@@ -46,41 +46,93 @@ R2R adds a **recovery arc**:
 - **Diff Engine** – Compares declared intent vs executed tx: token symbols, venues, slippage, leverage, notional, additional instructions. Emits structured violations.
 - **Policy Engine** – JSON/YAML rules evaluated via `json-rules-engine`. Example rules:
   - `IF venue != declaredVenue -> severity=critical`
-  - `IF leverage_used > leverage_planned * 1.2 -> autoRecover`
+  - `IF leverage_used > plan leverage * 1.2 -> autoRecover`
   - `IF memo missing reasoning hash -> warn`
 - **Recovery Orchestrator** – Library of playbooks:
   - `drift.close_position`: call Drift’s REST/MCP to flatten.
   - `jupiter.swap_to_stable`: convert residual to USDC via AgentWallet x Jupiter.
   - `agentwallet.revoke_session`: call AgentWallet policy API to pause.
   - `telegram.notify`: send evidence package to silicon.
-- **Evidence Ledger** – Postgres (or Lite) table + on-chain memo anchor with SHA-256 of full incident JSON.
+- **Evidence Ledger** – SQLite for demo; anchors evidence hash to Solana Memo for audit.
 - **Demo CLI** – Simulate: post reasoning (go long SOL 1x), execute mismatch tx (short 5x). Watch R2R auto-detect, close via Drift devnet, ping Telegram, anchor memo.
 
-## Tech stack
+## Getting started (local)
 
-- **Runtime:** TypeScript (Bun) for fast dev + nice tooling.
-- **Solana:** `@solana/web3.js`, Helius webhooks, Memo program for anchors.
-- **Protocols:** Drift MCP/REST, Jupiter quote+swap, AgentWallet actions.
-- **Storage:** SQLite (via `better-sqlite3`) for demo; swappable to Postgres.
-- **Infra:** Docker Compose for local run (Bun app + SQLite + ngrok webhook).
+```bash
+# prerequisites: Bun >= 1.3
+curl -fsSL https://bun.sh/install | bash  # once per environment
+export PATH="$HOME/.bun/bin:$PATH"
+
+# install deps
+bun install
+
+# run the API (default port 8787)
+bun run src/server.ts
+```
+
+### Environment knobs
+
+| variable | default | purpose |
+| --- | --- | --- |
+| `R2R_PORT` | `8787` | HTTP listen port |
+| `R2R_DB_PATH` | `./r2r.sqlite` | SQLite file location |
+| `R2R_LEVERAGE_TOLERANCE` | `0.2` | Allowed fractional delta before `LEVERAGE_BREACH` |
+| `R2R_NOTIONAL_TOLERANCE` | `0.15` | Allowed fractional delta for size mismatch |
+| `R2R_TELEGRAM_TOKEN`/`R2R_TELEGRAM_CHAT` | unset | Enable Telegram alerts |
+
+### Sample flow (manual curl)
+
+```bash
+# 1) agent posts a reasoning receipt
+curl -X POST http://localhost:8787/receipts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agentId":"bot-tom",
+    "receiptHash":"hash123",
+    "plan":{
+      "agentId":"bot-tom",
+      "venue":"drift",
+      "market":"SOL-PERP",
+      "side":"long",
+      "size":1,
+      "leverage":1,
+      "memoHash":"hash123"
+    }
+  }'
+
+# 2) Helius (or script) posts the observed tx
+curl -X POST http://localhost:8787/webhooks/helius \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agentId":"bot-tom",
+    "signature":"sig-1",
+    "venue":"jupiter",
+    "market":"SOL-PERP",
+    "side":"short",
+    "size":2,
+    "leverage":3,
+    "memo":"memo"
+  }'
+# -> R2R responds with the policy decision + simulated remediation steps
+```
 
 ## Roadmap to submission
 
 1. ✅ Ideation + repo seed
-2. 🔄 Spec + architecture doc (`docs/spec.md`)
-3. 🔄 Minimal service skeleton (Bun, Fastify, Prisma/SQL)
+2. ✅ Spec + architecture doc (`docs/spec.md`)
+3. ✅ Minimal service skeleton (Bun, Fastify, SQLite)
 4. 🔄 Integrations
    - Reasoning receipt adapter (SOLPRISM compatible)
    - Helius webhook ingestion (mockable)
    - Drift + AgentWallet remediation stubs (devnet)
 5. 🔄 Incident pipeline demo script + video
-6. 🔄 Colosseum project entry (problem/approach/audience/etc.)
+6. ✅ Colosseum project entry (problem/approach/audience/etc.)
 7. 🔜 Submission polish: README, architecture diagram, sample traces, anchor explorer links
 
 ## Links
 
 - Repo: https://github.com/SsaintZero/ReasoningToRecovery
-- Hackathon project (draft): _pending_
+- Hackathon project (draft): https://colosseum.com/agent-hackathon/projects/reasoning-to-recovery
 - Solana devnet wallet (AgentWallet): `9RrPnkM3ZZ2E5bDAsAJnLnW1Lu9oEq4djTNRry7mSPBm`
 - Telegram updates: `@1226829101`
 

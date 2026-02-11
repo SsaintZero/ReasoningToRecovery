@@ -1,5 +1,7 @@
 # Reasoning to Recovery – Technical Spec
 
+_Status: updated 2026-02-11 — service skeleton + SQLite ledger + policy engine stub implemented._
+
 ## Goal
 Detect when an autonomous Solana agent’s execution diverges from its declared reasoning, and autonomously trigger remediation (position flattening, wallet pause, human alert) with verifiable on-chain evidence.
 
@@ -9,21 +11,21 @@ Detect when an autonomous Solana agent’s execution diverges from its declared 
 - **Judge / auditor** – needs tamper-proof incident history to evaluate trustworthiness.
 
 ## Scope (MVP)
-1. Accept reasoning receipts (hash + plaintext plan + metadata) via HTTP.
-2. Watch Solana tx flow for a designated wallet via Helius webhook simulator.
-3. Compare intent vs execution across:
+1. ✅ Accept reasoning receipts (hash + plaintext plan + metadata) via HTTP.
+2. ✅ Watch Solana tx flow for a designated wallet via Helius webhook simulator.
+3. ✅ Compare intent vs execution across:
    - Market / protocol (Drift vs Jupiter)
    - Direction (long/short)
    - Size / leverage
    - Slippage / price bounds
    - Extra instructions (unexpected transfers)
-4. Run policy rules → pick outcome: `allow`, `warn`, `autoRemediate`.
-5. For `autoRemediate`, call:
+4. ✅ Run policy rules → pick outcome: `allow`, `warn`, `autoRemediate`.
+5. 🔄 For `autoRemediate`, call:
    - Drift MCP `close_positions`
    - Jupiter quote+swap via AgentWallet x402 fetch
    - AgentWallet policy patch to pause key
-6. Persist incident and anchor SHA-256 hash on-chain (Memo tx signed by AgentWallet wallet).
-7. Notify silicon via Telegram with summary + explorer links.
+6. 🔄 Persist incident and anchor SHA-256 hash on-chain (Memo tx signed by AgentWallet wallet).
+7. 🔄 Notify silicon via Telegram with summary + explorer links.
 
 ## Key integrations
 - **AgentWallet**
@@ -37,20 +39,20 @@ Detect when an autonomous Solana agent’s execution diverges from its declared 
 - **Jupiter**
   - Quote via `https://quote-api.jup.ag/v6/quote` (devnet) with slippage control.
 - **Telegram**
-  - Bot token already configured; use `message` tool for manual tests, but service will call Telegram HTTP API.
+  - Bot token already configured; service will call Telegram HTTP API when env vars provided.
 - **Solana RPC**
   - `solana devnet` via Helius or standard RPC for memo submission.
 
-## Data model (SQLite)
+## Data model (SQLite via `bun:sqlite`)
 ```
-tagents (id, wallet_pubkey, reasoning_public_key, name)
-receipts (id, agent_id, hash, payload_json, plan_json, created_at)
-executions (id, signature, raw_tx_json, parsed_json, observed_at)
+tagents (future)
+receipts (id, agent_id, receipt_hash, plan_json, reasoning, created_at)
+executions (id, agent_id, signature, payload_json, created_at)
 incidents (
   id, agent_id, receipt_id, execution_id,
   severity, policy_trigger, remediation_playbook,
-  remediation_status, memo_signature, evidence_hash,
-  alert_sent_at, created_at
+  status, violations_json, remediation_json,
+  memo_signature, evidence_hash, created_at
 )
 ```
 
@@ -62,7 +64,7 @@ incidents (
 - Validate hash -> store -> ack with receipt ID.
 
 ### 2. Execution watcher
-- Helius webhook POST `/webhooks/tx`
+- Helius webhook POST `/webhooks/tx` (implemented as `/webhooks/helius` stub)
 - For each tx:
   - Derive candidate receipt via `recent_receipt(agent, within=T)`
   - Parse tx (instructions, accounts, program IDs)
@@ -77,7 +79,7 @@ incidents (
 - Collate results -> feed policy engine.
 
 ### 4. Policy evaluation
-- Rules defined in `config/policies.json`
+- Rules defined in `config/policies.json` (baked into `policy.ts` for MVP)
 - Example rule format:
 ```json
 {
@@ -103,7 +105,7 @@ incidents (
 - Store signature.
 
 ## Demo flow (for submission video)
-1. Start local services (`bun dev`).
+1. Start local services (`bun run src/server.ts`).
 2. `scripts/postReceipt.ts` – send plan: "long 1 SOL on Drift, leverage 1x".
 3. `scripts/postExecution.ts` – simulate webhook for tx that shorts 5 SOL via Jupiter.
 4. Watch logs: violation triggered → policy selects `autoRemediate` → stub closes position → memo anchor → Telegram DM.
@@ -121,4 +123,4 @@ incidents (
 - **Security:** store secrets in `.env.local`, avoid committing tokens.
 
 ---
-Status: _WIP_ (updated 2026-02-11)
+_Status: WIP (updated 2026-02-11)_
