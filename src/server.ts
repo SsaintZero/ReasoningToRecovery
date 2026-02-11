@@ -2,7 +2,13 @@ import Fastify from "fastify";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { config } from "./config";
-import { insertReceipt, fetchRecentReceipt, insertExecution, insertIncident } from "./db";
+import {
+  insertReceipt,
+  fetchRecentReceipt,
+  insertExecution,
+  insertIncident,
+  fetchIncidents,
+} from "./db";
 import { diffPlan, evaluatePolicy } from "./policy";
 import { runPlaybook } from "./orchestrator";
 import { sendAlert } from "./alerts";
@@ -42,6 +48,12 @@ const executionSchema = z.object({
 });
 
 app.get("/health", async () => ({ status: "ok" }));
+
+app.get("/incidents", async (request, reply) => {
+  const limit = Number(request.query?.limit ?? 20);
+  const rows = fetchIncidents(Number.isNaN(limit) ? 20 : limit);
+  return reply.send({ incidents: rows });
+});
 
 app.post("/receipts", async (request, reply) => {
   const data = receiptSchema.parse(request.body);

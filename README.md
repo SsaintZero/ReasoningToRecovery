@@ -38,23 +38,13 @@ R2R adds a **recovery arc**:
 
 ## Core components (MVP scope)
 
-- **Receipt Ingest** – HTTP endpoint + adapters for:
-  - SOLPRISM commit/reveal (hash + plaintext reasoning)
-  - SlotScribe memo references
-  - Raw JSON trace (for agents without a spec)
+- **Receipt Ingest** – HTTP endpoint + adapters for SOLPRISM, SlotScribe, or raw JSON traces.
 - **Execution Watcher** – Helius webhooks (or polling) for the agent's Solana key(s). We parse instructions via `@solana/web3.js` + protocol-specific decoders.
 - **Diff Engine** – Compares declared intent vs executed tx: token symbols, venues, slippage, leverage, notional, additional instructions. Emits structured violations.
-- **Policy Engine** – JSON/YAML rules evaluated via `json-rules-engine`. Example rules:
-  - `IF venue != declaredVenue -> severity=critical`
-  - `IF leverage_used > plan leverage * 1.2 -> autoRecover`
-  - `IF memo missing reasoning hash -> warn`
-- **Recovery Orchestrator** – Library of playbooks:
-  - `drift.close_position`: call Drift’s REST/MCP to flatten.
-  - `jupiter.swap_to_stable`: convert residual to USDC via AgentWallet x Jupiter.
-  - `agentwallet.revoke_session`: call AgentWallet policy API to pause.
-  - `telegram.notify`: send evidence package to silicon.
-- **Evidence Ledger** – SQLite for demo; anchors evidence hash to Solana Memo for audit.
-- **Demo CLI** – Simulate: post reasoning (go long SOL 1x), execute mismatch tx (short 5x). Watch R2R auto-detect, close via Drift devnet, ping Telegram, anchor memo.
+- **Policy Engine** – JSON/YAML rules evaluated via `policy.ts` (e.g., venue mismatch, leverage breach, missing memo hash).
+- **Recovery Orchestrator** – Library of playbooks (flatten & pause, warn-only) that will call Drift, Jupiter, AgentWallet, and Telegram in the full version. Current build simulates those steps and records evidence hashes.
+- **Incident Ledger** – SQLite for demo; `/incidents` endpoint exposes the latest entries. Evidence hash will be anchored to Solana Memo in the next phase.
+- **Demo CLI** – `bun run scripts/demo.ts` walks through posting a receipt, simulating drift, and retrieving the incident log.
 
 ## Getting started (local)
 
@@ -69,6 +59,13 @@ bun install
 # run the API (default port 8787)
 bun run src/server.ts
 ```
+
+Hit the endpoints:
+
+- `GET /health`
+- `POST /receipts`
+- `POST /webhooks/helius`
+- `GET /incidents?limit=20`
 
 ### Environment knobs
 
@@ -113,8 +110,26 @@ curl -X POST http://localhost:8787/webhooks/helius \
     "leverage":3,
     "memo":"memo"
   }'
-# -> R2R responds with the policy decision + simulated remediation steps
+
+# 3) Read the incident log
+curl http://localhost:8787/incidents?limit=5
 ```
+
+### Demo script
+
+With the server running locally, execute:
+
+```bash
+bun run scripts/demo.ts
+```
+
+The script will:
+1. Create a sample reasoning receipt
+2. Simulate a drifted execution
+3. Print the policy decision + remediation payload
+4. Dump the latest incidents from `/incidents`
+
+Pass `R2R_BASE=http://host:port` to point it at a remote deployment.
 
 ## Roadmap to submission
 
@@ -125,7 +140,7 @@ curl -X POST http://localhost:8787/webhooks/helius \
    - Reasoning receipt adapter (SOLPRISM compatible)
    - Helius webhook ingestion (mockable)
    - Drift + AgentWallet remediation stubs (devnet)
-5. 🔄 Incident pipeline demo script + video
+5. 🔄 Incident pipeline demo script + video (**script done**, video pending)
 6. ✅ Colosseum project entry (problem/approach/audience/etc.)
 7. 🔜 Submission polish: README, architecture diagram, sample traces, anchor explorer links
 

@@ -79,6 +79,22 @@ export function insertExecution(row: {
   ).run(row.id, row.agent_id, row.signature, row.payload_json, row.created_at);
 }
 
+export type IncidentRow = {
+  id: string;
+  agent_id: string;
+  receipt_id?: string;
+  execution_id?: string;
+  severity: string;
+  policy_trigger?: string;
+  playbook?: string;
+  status: string;
+  violations_json: string;
+  remediation_json?: string;
+  memo_signature?: string;
+  evidence_hash?: string;
+  created_at: string;
+};
+
 export function insertIncident(row: {
   id: string;
   agent_id: string;
@@ -114,4 +130,14 @@ export function insertIncident(row: {
     row.evidence_hash ?? null,
     row.created_at
   );
+}
+
+export function fetchIncidents(limit = 20): IncidentRow[] {
+  return db
+    .query(
+      `SELECT id, agent_id, receipt_id, execution_id, severity, policy_trigger, playbook,
+              status, violations_json, remediation_json, memo_signature, evidence_hash, created_at
+       FROM incidents ORDER BY datetime(created_at) DESC LIMIT ?`
+    )
+    .all(limit) as IncidentRow[];
 }
