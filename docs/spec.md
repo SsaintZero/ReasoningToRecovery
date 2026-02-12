@@ -1,6 +1,6 @@
 # Reasoning to Recovery – Technical Spec
 
-_Status: updated 2026-02-11 — service skeleton + SQLite ledger + policy engine stub + incident API + demo script implemented._
+_Status: updated 2026-02-12 — SOLPRISM ingest, Helius signature checks, remediation integrations (Drift/AgentWallet/memo anchor), and enriched incident logs are live._
 
 ## Goal
 Detect when an autonomous Solana agent’s execution diverges from its declared reasoning, and autonomously trigger remediation (position flattening, wallet pause, human alert) with verifiable on-chain evidence.
@@ -15,19 +15,20 @@ Detect when an autonomous Solana agent’s execution diverges from its declared 
 2. ✅ Watch Solana tx flow for a designated wallet via Helius webhook simulator.
 3. ✅ Compare intent vs execution across: venue, direction, size, leverage, attestation memo.
 4. ✅ Run policy rules → pick outcome: `allow`, `warn`, `autoRemediate`.
-5. 🔄 For `autoRemediate`, call:
-   - Drift MCP `close_positions`
-   - Jupiter quote+swap via AgentWallet x402 fetch
-   - AgentWallet policy patch to pause key
-6. 🔄 Persist incident and anchor SHA-256 hash on-chain (Memo tx signed by AgentWallet wallet).
-7. ✅ Expose incident log via `GET /incidents`; 🔄 notify silicon via Telegram + provide explorer links.
+5. ✅ For `autoRemediate`, call:
+   - Drift MCP `close_positions` (hits configured endpoint or simulates)
+   - AgentWallet policy patch to pause key (webhook + bearer auth)
+   - Memo anchoring via Solana RPC when a keypair is present
+6. ✅ Persist incident and anchor SHA-256 hash on-chain (Memo tx signed by configured keypair; marked as skipped when absent).
+7. ✅ Expose incident log via `GET /incidents`; ✅ notify silicon via Telegram (links forthcoming when real txs exist).
 
 ## Key integrations
-- **AgentWallet** – to sign memos, pause wallets, pay for swaps (pending wiring)
-- **Helius** – webhook payloads feed `/webhooks/helius`
-- **Drift / Jupiter** – remediation playbooks (currently simulated)
-- **Telegram** – optional alert fan-out
-- **Solana RPC** – memo anchoring (todo)
+- **SOLPRISM** – adapter normalizes receipts posted to `/receipts/solprism`.
+- **Helius** – webhook payloads feed `/webhooks/helius` and must pass HMAC validation when a secret is present.
+- **Drift** – remediation playbook calls out to `DRIFT_CLOSE_ENDPOINT` (or simulates) to flatten positions.
+- **AgentWallet** – webhook/API pause path invoked when violations hit `autoRemediate` severity.
+- **Solana RPC** – memo anchoring writes the evidence hash on-chain via `SOLANA_MEMO_KEYPAIR`.
+- **Telegram** – alert fan-out to silicon (bot token + chat ID).
 
 ## Data model (SQLite via `bun:sqlite`)
 ```

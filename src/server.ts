@@ -1,4 +1,5 @@
-import Fastify from "fastify";
+import crypto from "crypto";
+import Fastify, { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { config } from "./config";
@@ -13,8 +14,19 @@ import { diffPlan, evaluatePolicy } from "./policy";
 import { runPlaybook } from "./orchestrator";
 import { sendAlert } from "./alerts";
 import { PlanIntent, ExecutionObservation } from "./types";
+import { normalizeSolPrismReceipt } from "./adapters/solprism";
 
 const app = Fastify({ logger: true });
+
+app.addContentTypeParser("application/json", { parseAs: "string" }, (request, payload, done) => {
+  try {
+    (request as FastifyRequest & { rawBody?: string }).rawBody = payload;
+    const json = JSON.parse(payload);
+    done(null, json);
+  } catch (err) {
+    done(err as Error);
+  }
+});
 
 const planSchema = z.object({
   agentId: z.string(),
@@ -47,6 +59,45 @@ const executionSchema = z.object({
   raw: z.any().optional(),
 });
 
+type RawBodyRequest = FastifyRequest & { rawBody?: string };
+
+function persistReceiptRecord(args: {
+  receiptId?: string;
+  receiptHash: string;
+  agentId: string;
+  plan: PlanIntent;
+  reasoning?: string;
+}) {
+  const receiptId = args.receiptId ?? nanoid();
+  insertReceipt({
+    id: receiptId,
+    agent_id: args.agentId,
+    receipt_hash: args.receiptHash,
+    plan_json: JSON.stringify(args.plan),
+    reasoning: args.reasoning ?? null,
+    created_at: new Date().toISOString(),
+  });
+  return receiptId;
+}
+
+function verifyHeliusSignature(request: RawBodyRequest) {
+  if (!config.helius.secret) {
+    return true;
+  }
+  const signature = request.headers["x-helius-signature"] as string | undefined;
+  const rawBody = request.rawBody;
+  if (!signature || !rawBody) {
+    return false;
+  }
+  const expected = crypto.createHmac("sha256", config.helius.secret).update(rawBody).digest("base64");
+  const expectedBuf = Buffer.from(expected);
+  const providedBuf = Buffer.from(signature);
+  return (
+    expectedBuf.length === providedBuf.length &&
+    crypto.timingSafeEqual(expectedBuf, providedBuf)
+  );
+}
+
 app.get("/health", async () => ({ status: "ok" }));
 
 app.get("/incidents", async (request, reply) => {
@@ -57,22 +108,34 @@ app.get("/incidents", async (request, reply) => {
 
 app.post("/receipts", async (request, reply) => {
   const data = receiptSchema.parse(request.body);
-  const receiptId = data.receiptId ?? nanoid();
+  const receiptId = persistReceiptRecord({
+    receiptId: data.receiptId,
+    receiptHash: data.receiptHash,
+    agentId: data.agentId,
+    plan: data.plan,
+    reasoning: data.reasoning ?? undefined,
+  });
+  return reply.code(201).send({ receiptId });
+});
 
-  const payload = {
-    id: receiptId,
-    agent_id: data.agentId,
-    receipt_hash: data.receiptHash,
-    plan_json: JSON.stringify(data.plan),
-    reasoning: data.reasoning ?? null,
-    created_at: new Date().toISOString(),
-  };
-
-  insertReceipt(payload);
+app.post("/receipts/solprism", async (request, reply) => {
+  const normalized = normalizeSolPrismReceipt(request.body);
+  const receiptId = persistReceiptRecord({
+    receiptId: normalized.receiptId,
+    receiptHash: normalized.receiptHash,
+    agentId: normalized.plan.agentId,
+    plan: normalized.plan,
+    reasoning: normalized.reasoning,
+  });
   return reply.code(201).send({ receiptId });
 });
 
 app.post("/webhooks/helius", async (request, reply) => {
+  if (!verifyHeliusSignature(request as RawBodyRequest)) {
+    request.log.warn("Invalid Helius signature");
+    return reply.code(401).send({ error: "invalid-signature" });
+  }
+
   const body = executionSchema.safeParse(request.body);
   if (!body.success) {
     return reply.code(400).send({ error: body.error.flatten() });

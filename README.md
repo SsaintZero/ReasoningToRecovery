@@ -38,13 +38,13 @@ R2R adds a **recovery arc**:
 
 ## Core components (MVP scope)
 
-- **Receipt Ingest** – HTTP endpoint + adapters for SOLPRISM, SlotScribe, or raw JSON traces.
-- **Execution Watcher** – Helius webhooks (or polling) for the agent's Solana key(s). We parse instructions via `@solana/web3.js` + protocol-specific decoders.
+- **Receipt Ingest** – HTTP endpoint now includes a native `/receipts/solprism` adapter that normalizes SOLPRISM payloads alongside the generic `/receipts` JSON ingress.
+- **Execution Watcher** – `/webhooks/helius` accepts the standard Helius webhook payloads and verifies the `x-helius-signature` header when `HELIUS_WEBHOOK_SECRET` is set.
 - **Diff Engine** – Compares declared intent vs executed tx: token symbols, venues, slippage, leverage, notional, additional instructions. Emits structured violations.
 - **Policy Engine** – JSON/YAML rules evaluated via `policy.ts` (e.g., venue mismatch, leverage breach, missing memo hash).
-- **Recovery Orchestrator** – Library of playbooks (flatten & pause, warn-only) that will call Drift, Jupiter, AgentWallet, and Telegram in the full version. Current build simulates those steps and records evidence hashes.
-- **Incident Ledger** – SQLite for demo; `/incidents` endpoint exposes the latest entries. Evidence hash will be anchored to Solana Memo in the next phase.
-- **Demo CLI** – `bun run scripts/demo.ts` walks through posting a receipt, simulating drift, and retrieving the incident log.
+- **Recovery Orchestrator** – Playbooks now call integrations for Drift closeouts, AgentWallet pauses, and on-chain memo anchoring. Each step actually hits the configured endpoints (or cleanly simulates when env vars are absent) and records per-step status/details.
+- **Incident Ledger** – SQLite for demo; `/incidents` endpoint exposes the latest entries. Evidence hashes are memo-anchored on Solana when a keypair is configured.
+- **Demo CLI** – `bun run scripts/demo.ts` walks through posting a receipt, simulating drift, and retrieving the incident log (and auto-signs the webhook if a Helius secret is configured).
 
 ## Getting started (local)
 
@@ -76,6 +76,13 @@ Hit the endpoints:
 | `R2R_LEVERAGE_TOLERANCE` | `0.2` | Allowed fractional delta before `LEVERAGE_BREACH` |
 | `R2R_NOTIONAL_TOLERANCE` | `0.15` | Allowed fractional delta for size mismatch |
 | `R2R_TELEGRAM_TOKEN`/`R2R_TELEGRAM_CHAT` | unset | Enable Telegram alerts |
+| `HELIUS_WEBHOOK_SECRET` | unset | Enables signature verification on `/webhooks/helius` |
+| `AGENTWALLET_WEBHOOK_URL` | unset | Real AgentWallet control plane endpoint (pause wallets) |
+| `AGENTWALLET_API_KEY` | unset | Bearer token for AgentWallet webhook |
+| `DRIFT_CLOSE_ENDPOINT` | unset | Endpoint that issues Drift `close_positions` instructions |
+| `DRIFT_API_KEY` | unset | Authorization header for Drift integration |
+| `SOLANA_RPC_URL` | `https://api.devnet.solana.com` | RPC used to anchor memo evidence |
+| `SOLANA_MEMO_KEYPAIR` | unset | Base58 or JSON secret key for memo-signing keypair |
 
 ### Sample flow (manual curl)
 
@@ -115,6 +122,39 @@ curl -X POST http://localhost:8787/webhooks/helius \
 curl http://localhost:8787/incidents?limit=5
 ```
 
+### SOLPRISM receipts
+
+If your agent already emits SOLPRISM-style reasoning packets, post them directly:
+
+```bash
+curl -X POST http://localhost:8787/receipts/solprism \
+  -H "Content-Type: application/json" \
+  -d '{
+    "receipt_id":"solprism-demo-1",
+    "agent_id":"bot-tom",
+    "reasoning_hash":"hash123",
+    "plan":{
+      "venue":"drift",
+      "market":"SOL-PERP",
+      "side":"long",
+      "size":"1",
+      "leverage":1,
+      "max_slippage_bps":50
+    },
+    "reasoning":"SOLPRISM payload example"
+  }'
+```
+
+The adapter normalizes number-like strings, copies the reasoning hash into `memoHash` if absent, and stores it alongside native receipts.
+
+### Helius webhook verification
+
+Set `HELIUS_WEBHOOK_SECRET` to enforce signature checks on `/webhooks/helius`. The server compares the incoming `x-helius-signature` header against an HMAC-SHA256 hash of the raw body. The demo script will auto-sign requests whenever the secret is set in its environment.
+
+### Evidence anchoring
+
+Provide `SOLANA_MEMO_KEYPAIR` (either base58 or JSON array) plus `SOLANA_RPC_URL` to write the remediation evidence hash onto the Solana Memo program. Successful anchors store the resulting transaction signature on each incident; without a keypair the step is marked as `skipped` but the rest of the playbook still runs.
+
 ### Demo script
 
 With the server running locally, execute:
@@ -129,25 +169,26 @@ The script will:
 3. Print the policy decision + remediation payload
 4. Dump the latest incidents from `/incidents`
 
-Pass `R2R_BASE=http://host:port` to point it at a remote deployment.
+Pass `R2R_BASE=http://host:port` to point it at a remote deployment. If `HELIUS_WEBHOOK_SECRET` is set in the environment, the script auto-signs its webhook payloads so you can exercise the verification flow end-to-end.
 
 ## Roadmap to submission
 
 1. ✅ Ideation + repo seed
 2. ✅ Spec + architecture doc (`docs/spec.md`)
 3. ✅ Minimal service skeleton (Bun, Fastify, SQLite)
-4. 🔄 Integrations
+4. ✅ Integrations
    - Reasoning receipt adapter (SOLPRISM compatible)
-   - Helius webhook ingestion (mockable)
-   - Drift + AgentWallet remediation stubs (devnet)
+   - Helius webhook ingestion + signature verification
+   - Drift + AgentWallet remediation hooks (+ memo anchoring when configured)
 5. 🔄 Incident pipeline demo script + video (**script done**, video pending)
 6. ✅ Colosseum project entry (problem/approach/audience/etc.)
-7. 🔜 Submission polish: README, architecture diagram, sample traces, anchor explorer links
+7. 🔜 Submission polish: README, architecture diagram, sample traces, anchor explorer links (see `docs/submission.md` for checklist)
 
 ## Links
 
 - Repo: https://github.com/SsaintZero/ReasoningToRecovery
 - Hackathon project (draft): https://colosseum.com/agent-hackathon/projects/reasoning-to-recovery
+- Submission packet & video script: [`docs/submission.md`](docs/submission.md)
 - Solana devnet wallet (AgentWallet): `9RrPnkM3ZZ2E5bDAsAJnLnW1Lu9oEq4djTNRry7mSPBm`
 - Telegram updates: `@1226829101`
 

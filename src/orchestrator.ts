@@ -1,9 +1,11 @@
 import crypto from "crypto";
-import { config } from "./config";
 import { PolicyDecision, PlanIntent, ExecutionObservation, Violation } from "./types";
+import { closePositions } from "./integrations/drift";
+import { pauseAgentWallet } from "./integrations/agentwallet";
+import { anchorEvidenceMemo } from "./integrations/solana";
 
 export type RemediationResult = {
-  steps: Array<{ description: string; status: "ok" | "skipped" }>; 
+  steps: Array<{ description: string; status: "ok" | "skipped" | "error"; detail?: string }>;
   memoSignature?: string;
   evidenceHash: string;
 };
@@ -28,11 +30,38 @@ export async function runPlaybook(params: {
     .digest("hex");
 
   const steps: RemediationResult["steps"] = [];
+  let memoSignature: string | undefined;
 
   if (decision.playbook === "flatten_and_pause") {
-    steps.push({ description: "Simulate Drift close_positions", status: "ok" });
-    steps.push({ description: "Simulate AgentWallet policy pause", status: "ok" });
-    steps.push({ description: "Simulate memo anchor on Solana", status: "ok" });
+    const driftResult = await closePositions({
+      agentId: plan.agentId,
+      market: execution.market,
+      size: execution.size,
+    });
+    steps.push({
+      description: "Drift close_positions",
+      status: driftResult.ok ? "ok" : "error",
+      detail: driftResult.detail,
+    });
+
+    const pauseResult = await pauseAgentWallet(decision.reason ?? "policy-breach");
+    steps.push({
+      description: "AgentWallet policy pause",
+      status: pauseResult.ok ? "ok" : "error",
+      detail: pauseResult.detail,
+    });
+
+    const memoResult = await anchorEvidenceMemo(JSON.stringify({
+      hash: evidenceHash,
+      agentId: plan.agentId,
+      signature: execution.signature,
+    }));
+    memoSignature = memoResult.signature;
+    steps.push({
+      description: "Anchor memo on Solana",
+      status: memoResult.ok ? "ok" : memoResult.detail === "no-keypair" ? "skipped" : "error",
+      detail: memoResult.signature ?? memoResult.detail,
+    });
   } else {
     steps.push({ description: "Warn only – no remediation required", status: "skipped" });
   }
@@ -40,6 +69,6 @@ export async function runPlaybook(params: {
   return {
     steps,
     evidenceHash,
-    memoSignature: decision.playbook === "flatten_and_pause" ? `SIMULATED-${Date.now()}` : undefined,
+    memoSignature,
   };
 }

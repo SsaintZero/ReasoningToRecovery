@@ -1,4 +1,7 @@
+import crypto from "crypto";
+
 const BASE_URL = process.env.R2R_BASE ?? "http://127.0.0.1:8787";
+const HELIUS_SECRET = process.env.HELIUS_WEBHOOK_SECRET ?? "";
 
 async function postReceipt() {
   const payload = {
@@ -42,10 +45,16 @@ async function postExecution() {
     memo: "demo memo",
   };
 
+  const body = JSON.stringify(payload);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (HELIUS_SECRET) {
+    headers["x-helius-signature"] = crypto.createHmac("sha256", HELIUS_SECRET).update(body).digest("base64");
+  }
+
   const res = await fetch(`${BASE_URL}/webhooks/helius`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    headers,
+    body,
   });
 
   if (!res.ok) {

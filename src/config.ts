@@ -12,8 +12,21 @@ export const config = {
     botToken: process.env.R2R_TELEGRAM_TOKEN || "",
     chatId: process.env.R2R_TELEGRAM_CHAT || "",
   },
+  helius: {
+    secret: process.env.HELIUS_WEBHOOK_SECRET || "",
+  },
   agentWallet: {
     username: process.env.AGENTWALLET_USERNAME || "precioussilas100",
     address: process.env.AGENTWALLET_SOLANA || "9RrPnkM3ZZ2E5bDAsAJnLnW1Lu9oEq4djTNRry7mSPBm",
+    webhookUrl: process.env.AGENTWALLET_WEBHOOK_URL || "",
+    apiKey: process.env.AGENTWALLET_API_KEY || "",
+  },
+  drift: {
+    closeEndpoint: process.env.DRIFT_CLOSE_ENDPOINT || "",
+    apiKey: process.env.DRIFT_API_KEY || "",
+  },
+  solana: {
+    rpcUrl: process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
+    memoKeypair: process.env.SOLANA_MEMO_KEYPAIR || "",
   },
 };
